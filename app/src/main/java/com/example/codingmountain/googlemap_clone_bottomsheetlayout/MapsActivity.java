@@ -3,22 +3,34 @@ package com.example.codingmountain.googlemap_clone_bottomsheetlayout;
 import android.Manifest;
 import android.content.IntentSender;
 import android.content.pm.PackageManager;
+import android.location.Address;
+import android.location.Geocoder;
 import android.location.Location;
 import android.location.LocationListener;
+import android.os.Bundle;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 import android.support.design.widget.BottomSheetBehavior;
+import android.support.design.widget.CoordinatorLayout;
 import android.support.design.widget.FloatingActionButton;
 import android.support.v4.app.ActivityCompat;
-import android.os.Bundle;
+import android.support.v4.app.FragmentActivity;
 import android.support.v4.content.ContextCompat;
-import android.support.v7.app.AppCompatActivity;
-import android.support.v7.widget.Toolbar;
+import android.support.v4.widget.DrawerLayout;
+import android.support.v7.widget.LinearLayoutManager;
+import android.support.v7.widget.RecyclerView;
+import android.text.Editable;
+import android.text.TextWatcher;
+import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.View;
+import android.view.ViewGroup;
+import android.widget.EditText;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import com.google.android.gms.common.ConnectionResult;
@@ -31,23 +43,40 @@ import com.google.android.gms.location.LocationServices;
 import com.google.android.gms.location.LocationSettingsRequest;
 import com.google.android.gms.location.LocationSettingsResult;
 import com.google.android.gms.location.LocationSettingsStatusCodes;
+import com.google.android.gms.location.places.PlaceBuffer;
+import com.google.android.gms.location.places.Places;
 import com.google.android.gms.maps.CameraUpdateFactory;
 import com.google.android.gms.maps.GoogleMap;
 import com.google.android.gms.maps.OnMapReadyCallback;
 import com.google.android.gms.maps.SupportMapFragment;
+import com.google.android.gms.maps.model.BitmapDescriptorFactory;
 import com.google.android.gms.maps.model.LatLng;
+import com.google.android.gms.maps.model.LatLngBounds;
 import com.google.android.gms.maps.model.Marker;
 import com.google.android.gms.maps.model.MarkerOptions;
 
-public class MapsActivity extends AppCompatActivity implements OnMapReadyCallback,
+import java.io.IOException;
+import java.util.List;
+
+public class MapsActivity extends FragmentActivity implements OnMapReadyCallback,
         GoogleApiClient.ConnectionCallbacks,
         GoogleApiClient.OnConnectionFailedListener,
         LocationListener,
         GoogleMap.OnMarkerDragListener,
-        GoogleMap.OnMapLongClickListener {
+        GoogleMap.OnMapLongClickListener, View.OnClickListener {
 
+    private static final LatLngBounds BOUNDS_INDIA = new LatLngBounds(
+            new LatLng(-0, 0), new LatLng(0, 0));
 
+    private EditText mAutocompleteView;
+    private RecyclerView mRecyclerView;
+    private LinearLayoutManager mLinearLayoutManager;
+    private PlacesAutoCompleteAdapter mAutoCompleteAdapter;
+    ImageView delete;
+    private GoogleMap.OnCameraIdleListener onCameraIdleListener;
+    private TextView resutText;
     private GoogleMap mMap;
+    private TextView buttonManual;
     public static final int RequestPermissionCode = 1;
     GoogleApiClient mGoogleApiClient;
     //To store longitude and latitude from map
@@ -56,6 +85,7 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
     //Google ApiClient
     private GoogleApiClient googleApiClient;
     private String TAG = "gps";
+
     public static final int REQUEST_CHECK_SETTINGS = 123;
     LocationRequest mLocationRequest;
     int INTERVAL = 1000;
@@ -65,42 +95,39 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
     LinearLayout tapactionlayout;
     View white_forground_view;
     View bottomSheet;
+    DrawerLayout drawerLayout;
+    LinearLayout linearLayout;
 
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_maps);
+        buildGoogleApiClient();
+
+        linearLayout = (LinearLayout) findViewById(R.id.addresses);
+
+        drawerLayout = (DrawerLayout) findViewById(R.id.drawer_layout);
+
+        buttonManual = (TextView) findViewById(R.id.buttonManual);
+        buttonManual.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                setAddressHeight();
+            }
+        });
         // Obtain the SupportMapFragment and get notified when the map is ready to be used.
         SupportMapFragment mapFragment = (SupportMapFragment) getSupportFragmentManager()
                 .findFragmentById(R.id.map);
         floatingActionButton = (FloatingActionButton) findViewById(R.id.fab);
         tapactionlayout = (LinearLayout) findViewById(R.id.tap_action_layout);
         bottomSheet = findViewById(R.id.bottom_sheet1);
+
+        resutText = (TextView) findViewById(R.id.dragg_result);
         mBottomSheetBehavior1 = BottomSheetBehavior.from(bottomSheet);
-        mBottomSheetBehavior1.setPeekHeight(120);
+
         mBottomSheetBehavior1.setState(BottomSheetBehavior.STATE_COLLAPSED);
-        mBottomSheetBehavior1.setBottomSheetCallback(new BottomSheetBehavior.BottomSheetCallback() {
-            @Override
-            public void onStateChanged(@NonNull View bottomSheet, int newState) {
-                if (newState == BottomSheetBehavior.STATE_COLLAPSED) {
-                    tapactionlayout.setVisibility(View.VISIBLE);
-                }
 
-                if (newState == BottomSheetBehavior.STATE_EXPANDED) {
-                    tapactionlayout.setVisibility(View.GONE);
-                }
-
-                if (newState == BottomSheetBehavior.STATE_DRAGGING) {
-                    tapactionlayout.setVisibility(View.GONE);
-                }
-            }
-
-            @Override
-            public void onSlide(@NonNull View bottomSheet, float slideOffset) {
-
-            }
-        });
 
         tapactionlayout.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -112,24 +139,10 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
             }
         });
 
-        // Find the toolbar view inside the activity layout
-        Toolbar toolbar = (Toolbar) findViewById(R.id.toolbar);
-        // Sets the Toolbar to act as the ActionBar for this Activity window.
-        // Make sure the toolbar exists in the activity and is not null
-        setSupportActionBar(toolbar);
-        getSupportActionBar().setHomeButtonEnabled(true);
-        getSupportActionBar().setDisplayHomeAsUpEnabled(true);
-        getSupportActionBar().setHomeAsUpIndicator(R.drawable.ic_menu_black_24dp);
-        getSupportActionBar().setTitle("Search here");
 
 
         mapFragment.getMapAsync(this);
-        //Initializing googleapi client
-        googleApiClient = new GoogleApiClient.Builder(this)
-                .addConnectionCallbacks(this)
-                .addOnConnectionFailedListener(this)
-                .addApi(LocationServices.API)
-                .build();
+
 
         mLocationRequest = new LocationRequest();
 //        mLocationRequest.setNumUpdates(1);
@@ -144,7 +157,128 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
                 getCurrentLocation();
             }
         });
+        setBottomHeight();
+        configureCameraIdle();
+        initView();
+    }
 
+    void setBottomHeight(){
+        DisplayMetrics displayMetrics = new DisplayMetrics();
+        this.getWindowManager().getDefaultDisplay().getMetrics(displayMetrics);
+        int heights = displayMetrics.heightPixels;
+        double height =  (heights / 2);
+        int pixels = (int) (height);
+        CoordinatorLayout.LayoutParams rel_space3 = new CoordinatorLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, pixels);
+        mBottomSheetBehavior1.setPeekHeight(pixels);
+        drawerLayout.setLayoutParams(rel_space3);
+        bottomSheet.setVisibility(View.VISIBLE);
+        linearLayout.setVisibility(View.GONE);
+    }
+    void setAddressHeight(){
+        DisplayMetrics displayMetrics = new DisplayMetrics();
+        this.getWindowManager().getDefaultDisplay().getMetrics(displayMetrics);
+        int heights = displayMetrics.heightPixels;
+        double height =  (heights /2);
+        double full =  heights;
+        double heightAdress = height;
+        int pixel2 = (int) (full);
+        CoordinatorLayout.LayoutParams rel_space2 = new CoordinatorLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,pixel2);
+        bottomSheet.setVisibility(View.GONE);
+        linearLayout.setVisibility(View.VISIBLE);
+        drawerLayout.setLayoutParams(rel_space2);
+
+
+    }
+    private void initView(){
+        mAutocompleteView = (EditText)findViewById(R.id.autocomplete_places);
+
+        delete=(ImageView)findViewById(R.id.cross);
+
+        mAutoCompleteAdapter =  new PlacesAutoCompleteAdapter(this, R.layout.searchview_adapter,
+                mGoogleApiClient, BOUNDS_INDIA, null);
+
+        mRecyclerView=(RecyclerView)findViewById(R.id.recyclerView);
+        mLinearLayoutManager=new LinearLayoutManager(this);
+        mRecyclerView.setLayoutManager(mLinearLayoutManager);
+        mRecyclerView.setAdapter(mAutoCompleteAdapter);
+        delete.setOnClickListener(this);
+        mAutocompleteView.addTextChangedListener(new TextWatcher() {
+
+            public void onTextChanged(CharSequence s, int start, int before,
+                                      int count) {
+                if (!s.toString().equals("") && mGoogleApiClient.isConnected()) {
+                    mAutoCompleteAdapter.getFilter().filter(s.toString());
+                }else if(!mGoogleApiClient.isConnected()){
+                    Toast.makeText(getApplicationContext(), Constants.API_NOT_CONNECTED,Toast.LENGTH_SHORT).show();
+                    Log.e(Constants.PlacesTag,Constants.API_NOT_CONNECTED);
+                }
+
+            }
+
+            public void beforeTextChanged(CharSequence s, int start, int count,
+                                          int after) {
+
+            }
+
+            public void afterTextChanged(Editable s) {
+              //  Toast.makeText(getApplicationContext(), Integer.toString(mAutoCompleteAdapter.getItemCount()),Toast.LENGTH_SHORT).show();
+                mAutoCompleteAdapter.getItemCount();
+            }
+        });
+        mRecyclerView.addOnItemTouchListener(
+                new RecyclerItemClickListener(this, new RecyclerItemClickListener.OnItemClickListener() {
+                    @Override
+                    public void onItemClick(View view, int position) {
+                        final PlacesAutoCompleteAdapter.PlaceAutocomplete item = mAutoCompleteAdapter.getItem(position);
+                        final String placeId = String.valueOf(item.placeId);
+                        Log.i("TAG", "Autocomplete item selected: " + item.description);
+                        /*
+                             Issue a request to the Places Geo Data API to retrieve a Place object with additional details about the place.
+                         */
+
+                        PendingResult<PlaceBuffer> placeResult = Places.GeoDataApi
+                                .getPlaceById(mGoogleApiClient, placeId);
+                        placeResult.setResultCallback(new ResultCallback<PlaceBuffer>() {
+                            @Override
+                            public void onResult(PlaceBuffer places) {
+                                if(places.getCount()==1){
+                                    //Do the things here on Click.....
+                                    Toast.makeText(getApplicationContext(),String.valueOf(places.get(0).getLatLng()),Toast.LENGTH_SHORT).show();
+                                }else {
+                                    Toast.makeText(getApplicationContext(),Constants.SOMETHING_WENT_WRONG,Toast.LENGTH_SHORT).show();
+                                }
+                            }
+                        });
+                        Log.i("TAG", "Clicked: " + item.description);
+                        Log.i("TAG", "Called getPlaceById to get Place details for " + item.placeId);
+                    }
+                })
+        );
+    }
+
+    private void configureCameraIdle() {
+        onCameraIdleListener = new GoogleMap.OnCameraIdleListener() {
+            @Override
+            public void onCameraIdle() {
+
+                LatLng latLng = mMap.getCameraPosition().target;
+                Geocoder geocoder = new Geocoder(MapsActivity.this);
+
+                try {
+                    List<Address> addressList = geocoder.getFromLocation(latLng.latitude, latLng.longitude, 1);
+                    if (addressList != null && addressList.size() > 0) {
+                        String locality = addressList.get(0).getAddressLine(0);
+                        String country = addressList.get(0).getCountryName();
+                        if (!locality.isEmpty() && !country.isEmpty())
+                            resutText.setText(locality + "  " + country);
+                    }
+
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+
+            }
+        };
     }
 
     // The callback for the management of the user settings regarding location
@@ -188,6 +322,7 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
         mMap.moveCamera(CameraUpdateFactory.newLatLng(sydney));
         //Setting onMarkerDragListener to track the marker drag
         mMap.setOnMarkerDragListener(this);
+        mMap.setOnCameraIdleListener(onCameraIdleListener);
         //Adding a long click listener to the map
         mMap.setOnMapLongClickListener(this);
 
@@ -256,6 +391,7 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
                 .addConnectionCallbacks(this)
                 .addOnConnectionFailedListener(this)
                 .addApi(LocationServices.API)
+                .addApi(Places.GEO_DATA_API)
                 .build();
         mGoogleApiClient.connect();
     }
@@ -300,13 +436,13 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
 
     @Override
     protected void onStart() {
-        googleApiClient.connect();
+        mGoogleApiClient.connect();
         super.onStart();
     }
 
     @Override
     protected void onStop() {
-        googleApiClient.disconnect();
+        mGoogleApiClient.disconnect();
         super.onStop();
     }
 
@@ -343,12 +479,18 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
         moveMap();
 
     }
+    @Override
+    public void onClick(View v) {
+        if(v==delete){
+            mAutocompleteView.setText("");
+        }
+    }
 
     //Getting current location
     private void getCurrentLocation() {
         Location location = null;
         if (checkPermission()) {
-            location = LocationServices.FusedLocationApi.getLastLocation(googleApiClient);
+            location = LocationServices.FusedLocationApi.getLastLocation(mGoogleApiClient);
         }
 
         if (location != null) {
@@ -372,7 +514,9 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
         //Adding marker to map
         mMap.addMarker(new MarkerOptions()
                 .position(latLng) //setting position
-                .draggable(true) //Making the marker draggable
+                .draggable(true)//Making the marker draggable
+                .icon(BitmapDescriptorFactory
+                        .defaultMarker(BitmapDescriptorFactory.HUE_BLUE))
                 .title("Current Location")); //Adding a title
 
         //Moving the camera
